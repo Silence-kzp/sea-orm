@@ -71,11 +71,26 @@ impl ToTokens for TryFromQueryResultCheck<'_> {
                     quote! { pre }
                 };
                 tokens.extend(quote! {
-                    let #ident = match sea_orm::FromQueryResult::from_query_result_nullable(row, #prefix) {
-                        Err(v @ sea_orm::TryGetError::DbErr(_)) => {
-                            return Err(v);
+                    let #ident = {
+                        // Check if any nested field exists in the query result
+                        let column_names = row.column_names();
+                        let has_nested_columns = column_names.iter().any(|col| col.starts_with(#prefix));
+                        
+                        if has_nested_columns {
+                            match sea_orm::FromQueryResult::from_query_result_nullable(row, #prefix) {
+                                Err(sea_orm::TryGetError::Null(_)) => {
+                                    // If all nested fields are null (no matching record), return None
+                                    Ok(None)
+                                }
+                                Err(v @ sea_orm::TryGetError::DbErr(_)) => {
+                                    return Err(v);
+                                }
+                                v => v,
+                            }
+                        } else {
+                            // If no nested columns exist in the result, return None
+                            Ok(None)
                         }
-                        v => v,
                     };
                 });
             }
